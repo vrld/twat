@@ -13,7 +13,7 @@ class Twat
         typedef std::map<std::string, std::string> Trends;
         typedef std::vector<std::string> Tweets;
 
-        Twat(bool fake = false);
+        Twat();
         ~Twat();
         void get_tweets(size_t per_trend);
         std::string next_tweet();
@@ -21,7 +21,6 @@ class Twat
         inline size_t tweetcount() const { return tweets_.size(); }
 
     private:
-        void fake_fetch(size_t per_trend);
         static int writer(char *data, size_t size, size_t nmemb, Twat* self);
         const std::string& fetch_url(const std::string& url);
 

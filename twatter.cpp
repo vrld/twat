@@ -9,8 +9,12 @@
 
 #include "twat.hpp"
 
+#ifndef VOICE
+#define VOICE register_cmu_us_kal
+#endif
+
 // sound
-extern "C" cst_voice *register_cmu_us_kal();
+extern "C" cst_voice *VOICE();
 size_t NUM_SPEAKERS = 20;
 cst_voice *voice;
 ALuint *buffer;
@@ -83,16 +87,9 @@ struct Speaker
 
 int main(int argc, char **argv)
 {
-    bool fake_fetch = false;
     if (argc > 1) {
-        for (int i = 0; i < argc; ++i) {
-            if (argv[i][0] == '-') {
-                fake_fetch |= (std::string(argv[i]) == "-fake");
-            } else {
-                std::stringstream ss(argv[i]);
-                ss >> NUM_SPEAKERS;
-            }
-        }
+        std::stringstream ss(argv[1]);
+        ss >> NUM_SPEAKERS;
     }
 
     try { init(); } catch (const char* e) 
@@ -102,7 +99,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    Twat twat(fake_fetch);
+    Twat twat;
     Fetcher fetcher(twat);
     Speaker speaker(twat);
 
@@ -119,7 +116,7 @@ void init()
     srand(time(NULL));
     voice = NULL;
     flite_init();
-    voice = register_cmu_us_kal();
+    voice = VOICE();
     if (!voice)
         throw "no voice!";
 

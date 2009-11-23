@@ -3,8 +3,7 @@
 #include <algorithm>
 #include <sstream>
 
-Twat::Twat(bool fake) 
-    : do_fake_fetch_(fake)
+Twat::Twat()
 {
     curl_ = curl_easy_init();
     if (!curl_)
@@ -25,15 +24,8 @@ Twat::~Twat()
         curl_easy_cleanup(curl_);
 }
 
-#include "fake_fetch.h"
-
 void Twat::get_tweets(size_t per_trend)
 {
-    if (do_fake_fetch_) {
-        fake_fetch(per_trend);
-        return;
-    }
-
     Json::Value root_tr, root_se;
     Json::Reader reader;
 
