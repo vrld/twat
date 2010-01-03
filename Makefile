@@ -1,26 +1,21 @@
-# EDIT THESE TO POINT TO JSONCPP!
-JSONCPP_INCLUDE_DIR=$(HOME)/.local/include/
-JSONCPP_LIBRARY=json_linux-gcc-4.3.4_libmt
+CC=gcc
+CFLAGS=-Wall -Wextra -Werror -pedantic -ansi -g -msse -std=c99
 
-# CHANGE THE VOICE HERE
-VOICE=cmu_us_kal
+all : udp.o server client
 
-# this should be fine
-CXX=g++
-CXXFLAGS=-Wall -Wextra -Werror -pedantic -ansi -g -msse -D VOICE=register_$(VOICE) -I$(JSONCPP_INCLUDE_DIR)
-LDFLAGS=-lflite_$(VOICE) -lflite_usenglish -lflite_cmulex -lflite -lm -lalut -lcurl -lboost_thread -l$(JSONCPP_LIBRARY)
+udp.o : udp.c
+	$(CC) -c $(CFLAGS) udp.c -o udp.o
 
-SOURCES=twatter.cpp twat.cpp
-OBJECTS=$(SOURCES:.cpp=.o)
-EXECUTABLE=twatter
+.PHONY: server
+server :
+	$(MAKE) -C server $(MFLAGS)
 
-all: $(SOURCES) $(EXECUTABLE) 
+.PHONY: client
+client :
+	$(MAKE) -C client $(MFLAGS)
 
-$(EXECUTABLE): $(OBJECTS)
-	$(CXX) $(LDFLAGS) $(OBJECTS) -o $@
-
-.cpp.o:
-	$(CXX) -c $(CXXFLAGS) $(INCLUDE) $< -o $@
-
-clean:
-	rm -rf *.o $(EXECUTABLE)
+.PHONY: clean
+clean :
+	$(MAKE) -C server $(MFLAGS) clean
+	$(MAKE) -C client $(MFLAGS) clean
+	rm -rf *.o

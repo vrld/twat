@@ -37,9 +37,16 @@ Step 0: Get and install the following:
    * OpenAL and ALUT     (http://www.openal.org/)
    * FLite               (http://www.speech.cs.cmu.edu/flite/)
    * cURL                (http://curl.haxx.se/)
-   * JsonCpp             (http://jsoncpp.sourceforge.net/)
-   * Boost/Boost Thread  (http://www.boost.org/)
 
 Step 1: Edit Makefile according to your needs.
 Step 2: $ make
-Step 3: There is no step 3.
+Step 3: Run server: ./twats [port]
+Step 4: Run clients: for i in $(seq 1 50); do ./twatc 127.0.0.1 [port] &; done;
+Step 5: killall twatc twats
+
+====== External Libraries ======
+For getting tweets from twitter, the twitter API Was used. This
+API Uses JSON (http://json.org/) as its data format. Since I
+did not want to write a parser myself, a stripped down version of
+the excellent cJSON library (http://sourceforge.net/projects/cjson/)
+was used to do so.
