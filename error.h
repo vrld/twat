@@ -32,9 +32,8 @@
 #include <stdlib.h>
 
 #define str(s) #s
-#define xstr(s) str(s)
 #define error_and_exit(what, where1, where2) do { \
-    printf("Error in %s%s: %s\n", (where1), xstr((where2)), (what)); \
+    printf("Error in %s%s: %s\n", (where1), str((where2)), (what)); \
     exit(-1); \
 } while(0)
 #define CHECK_NULL(var, err) if (!(var)) error_and_exit((err), __FILE__, __LINE__)

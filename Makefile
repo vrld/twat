@@ -1,10 +1,13 @@
 CC=gcc
 CFLAGS=-Wall -Wextra -Werror -pedantic -ansi -g -msse -std=c99
 
-all : udp.o server client
+all : udp.o signal_handler.o server client
 
 udp.o : udp.c
 	$(CC) -c $(CFLAGS) udp.c -o udp.o
+
+signal_handler.o : signal_handler.c
+	$(CC) -c $(CFLAGS) signal_handler.c -o signal_handler.o
 
 .PHONY: server
 server :
