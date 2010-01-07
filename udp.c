@@ -28,8 +28,10 @@
 #include "udp.h"
 #include <string.h>
 #include <stdlib.h>
+#include <sys/time.h>
+#include <unistd.h>
 
-int udp_create_socket(struct sockaddr_in* addr, size_t size_addr, in_addr_t ip_addr, int port)
+int udp_create_socket(struct sockaddr_in* addr, size_t size_addr, in_addr_t ip_addr, int port, int timeout)
 {
     int sock;
     memset(addr, 0, size_addr);
@@ -38,6 +40,16 @@ int udp_create_socket(struct sockaddr_in* addr, size_t size_addr, in_addr_t ip_a
     addr->sin_port = htons(port);
 
     sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock > 0 && timeout > 0) {
+        struct timeval tv;
+        tv.tv_sec = timeout;
+        tv.tv_usec = 0;
+        if (-1 == setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv))) {
+            close(sock);
+            sock = -1;
+        }
+    }
+
     return sock;
 }
 

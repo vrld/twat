@@ -27,6 +27,7 @@
  */
 #include <stdlib.h>
 #include "../error.h"
+#include "../signal_handler.h"
 #include "../udp.h"
 #include "twitter.h"
 
@@ -62,13 +63,14 @@ int main(int argc, char** argv)
     }
 
     atexit(at_exit);
+    set_signal_handlers();
 
     T = twitter_new();
     printf("Reading tweets...\n");
     fetch_tweets(T, 10);
 
     printf("Opening server...\n");
-    sock = udp_create_socket(&server, sizeof(server), htonl(INADDR_ANY), atoi(argv[1]));
+    sock = udp_create_socket(&server, sizeof(server), htonl(INADDR_ANY), atoi(argv[1]), 0);
     if (sock < 0)
         error_and_exit("cannot create socket", __FILE__, __LINE__);
 

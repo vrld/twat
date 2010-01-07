@@ -34,11 +34,14 @@
 #endif
 
 #include "../error.h"
+#include "../signal_handler.h"
 #include "../udp.h"
 
 #include <stdio.h>
 #include <unistd.h>
 #define BUFSIZE 255
+#define WAIT_FOR_RECEIVE 5
+#define MAX_TIMEOUTS 25
 
 int usleep(unsigned int usec);
 
@@ -66,6 +69,7 @@ void init()
 
 void at_exit()
 {
+    printf("Shutting down...\n");
     alSourceStop(source);
     alSourcei(source, AL_BUFFER, 0);
     alDeleteSources(1, &source);
@@ -106,7 +110,7 @@ int main(int argc, char** argv)
 {
     struct sockaddr_in server, client;
     char buffer[BUFSIZE+1];
-    int transfered = 0;
+    int transfered = 0, timeoutcount = 0;
     ALint source_state;
 
     if (argc < 3) {
@@ -116,9 +120,10 @@ int main(int argc, char** argv)
 
     voice = NULL;
     atexit(at_exit);
+    set_signal_handlers();
     init();
 
-    sock = udp_create_socket(&server, sizeof(server), inet_addr(argv[1]), atoi(argv[2]));
+    sock = udp_create_socket(&server, sizeof(server), inet_addr(argv[1]), atoi(argv[2]), WAIT_FOR_RECEIVE);
     if (sock < 0)
         error_and_exit("Cannot create socket", __FILE__, __LINE__);
     
@@ -128,17 +133,27 @@ int main(int argc, char** argv)
             error_and_exit("Cannot send message to server", __FILE__, __LINE__);
 
         transfered = udp_receive(sock, buffer, BUFSIZE, &client, sizeof(client));
+        if (transfered == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                ++timeoutcount;
+                if (timeoutcount >= MAX_TIMEOUTS) {
+                    printf("Maximum timeouts exceeded. Server is considered dead.");
+                    exit(0);
+                }
+                printf("Server timed out (%d).\n", timeoutcount);
+                continue;
+            } else {
+                error_and_exit("Cannot read from server", __FILE__, __LINE__);
+            }
+        } else if (transfered == 0) {
+                error_and_exit("Server has shut down", __FILE__, __LINE__);
+        }
         if (server.sin_addr.s_addr != client.sin_addr.s_addr)
             error_and_exit("Received message from unexpected server", __FILE__, __LINE__);
 
-        switch (transfered) {
-            case -1: 
-                error_and_exit("Cannot read from server", __FILE__, __LINE__);
-            case 0:
-                error_and_exit("Server has shut down", __FILE__, __LINE__);
-        }
+        timeoutcount = 0;
 
-        printf("%s\n", buffer);
+        //printf("%s\n", buffer);
 
         /* play tweet and wait for it to finish */
         say_text(buffer);

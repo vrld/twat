@@ -32,7 +32,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-int udp_create_socket(struct sockaddr_in* addr, size_t size_addr, in_addr_t ip_addr, int port);
+int udp_create_socket(struct sockaddr_in* addr, size_t size_addr, in_addr_t ip_addr, int port, int timeout);
 int udp_receive(int sock, char* buffer, size_t size, struct sockaddr_in* client, socklen_t size_client);
 int udp_send(int sock, const char* msg, struct sockaddr_in* client, socklen_t size_client);
 

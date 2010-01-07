@@ -30,6 +30,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 
 #define str(s) #s
 #define error_and_exit(what, where1, where2) do { \
