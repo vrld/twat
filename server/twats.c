@@ -48,6 +48,19 @@ void at_exit()
     twitter_delete(T);
 }
 
+int usleep(unsigned int usec);
+void* thread_fetch_tweets(void* _)
+{
+    (void)_;
+    while (1) 
+    {
+        if (T->messages->size < 50)
+            fetch_tweets(T, 15);
+
+        usleep(1000);
+    }
+}
+
 int main(int argc, char** argv)
 {
     struct sockaddr_in server;
@@ -56,6 +69,7 @@ int main(int argc, char** argv)
     socklen_t len_client;
     int transfered = 0;
     char* msg;
+    pthread_t thread_tweet_fetcher;
 
     if (argc < 2) {
         printf("USAGE: %s [port]\n", argv[0]);
@@ -67,7 +81,9 @@ int main(int argc, char** argv)
 
     T = twitter_new();
     printf("Reading tweets...\n");
-    fetch_tweets(T, 10);
+    fetch_tweets(T, 15);
+
+    pthread_create(&thread_tweet_fetcher, NULL, thread_fetch_tweets, NULL);
 
     printf("Opening server...\n");
     sock = udp_create_socket(&server, sizeof(server), htonl(INADDR_ANY), atoi(argv[1]), 0);
