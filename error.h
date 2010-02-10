@@ -38,6 +38,5 @@
     exit(-1); \
 } while(0)
 #define CHECK_NULL(var, err) if (!(var)) error_and_exit((err), __FILE__, __LINE__)
-#define ON_AL_ERROR(err) if (alGetError()!=AL_NO_ERROR) error_and_exit((err), __FILE__, __LINE__);
 
 #endif
