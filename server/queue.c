@@ -35,6 +35,9 @@ Queue* queue_new()
     q = (Queue*)malloc(sizeof(Queue));
     CHECK_NULL(q, "cannot reserve space for queue");
     q->front = q->back = NULL;
+    q->size = 0;
+
+    pthread_mutex_init( &(q->lock), NULL );
 
     return q;
 }
@@ -49,6 +52,9 @@ void queue_delete(Queue* q)
         dequeue(q);
         temp = temp->next;
     } while (temp);
+
+    pthread_mutex_destroy( &(q->lock) );
+
     free(q);
 }
 
@@ -64,11 +70,14 @@ void enqueue(Queue* q, const char* msg)
     strcpy(temp->message, msg);
     temp->next = NULL;
 
+    pthread_mutex_lock( &(q->lock) );
     if (q->back)
         q->back->next = temp;
     if (q->front == NULL)
         q->front = temp;
     q->back = temp;
+    ++(q->size);
+    pthread_mutex_unlock( &(q->lock) );
 }
 
 void dequeue(Queue* q)
@@ -76,17 +85,24 @@ void dequeue(Queue* q)
     Queue_item *temp;
     CHECK_NULL(q, "queue was null");
 
+    pthread_mutex_lock( &(q->lock) );
     temp = q->front;
-    if (!temp) /* queue already empty! */
+    if (!temp) { /* queue already empty! */
+        pthread_mutex_unlock( &(q->lock) );
         return;
+    }
 
     q->front = temp->next;
     if (q->front == NULL)
         q->back = NULL;
 
+    --(q->size);
+    pthread_mutex_unlock( &(q->lock) );
+
     free(temp->message);
     free(temp);
     temp = NULL;
+
 }
 
 const char* front(Queue* q)

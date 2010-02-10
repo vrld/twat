@@ -28,6 +28,8 @@
 #ifndef QUEUE_H_
 #define QUEUE_H_
 
+#include <pthread.h>
+
 typedef struct Queue_item_ {
     char* message;
     struct Queue_item_* next;
@@ -36,6 +38,8 @@ typedef struct Queue_item_ {
 typedef struct Queue_ {
     Queue_item *front;
     Queue_item *back;
+    size_t size;
+    pthread_mutex_t lock;
 } Queue;
 
 #define queue_empty(q) (q->front == q->back)
