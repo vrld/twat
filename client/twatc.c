@@ -50,10 +50,12 @@ cst_voice *voice;
 int sock = -1;
 
 struct stream_info {
-    cst_wave* w;
+    cst_wave** w;
     long pos;
-    int channel;
+    int done;
     int channel_count;
+    double rate_delay;
+    double cur_delay;
 };
 
 static struct stream_info si;
@@ -78,6 +80,15 @@ void init()
 void at_exit()
 {
     Pa_Terminate();
+    int i;
+
+    if (si.w != NULL)
+    {
+        for (i = 0; i < si.channel_count; ++i)
+            delete_wave(si.w[i]);
+        free(si.w);
+        si.w = NULL;
+    }
 
     if (voice) {
         delete_voice(voice);
@@ -96,22 +107,35 @@ static int say_text_callback(const void* in, void* output,
     struct stream_info* stream = (struct stream_info*)udata;
     short* out = (short*)output;
     unsigned int i;
-    int k;
+    int k, active = 0;
+    cst_wave* wave;
 
     for (i = 0; i < frames; ++i) 
     {
-        if (stream->w->num_samples - stream->pos - i <= 0)
-            return paComplete;
-
         for (k = 0; k < stream->channel_count; ++k) 
         {
-            if (k == stream->channel)
-                *out++ = stream->w->samples[stream->pos];
-            else 
+            wave = stream->w[k];
+            if (wave->num_samples - stream->pos - 1 <= 0)
+            {
                 *out++ = 0x0FFF;
+            } 
+            else 
+            {
+                *out++ = wave->samples[stream->pos];
+                active = 1;
+            }
         }
-        stream->pos++;
+
+        /* hack for certain sound cards that dont support low sample rates... */
+        stream->cur_delay += 1.;
+        if (stream->cur_delay >= stream->rate_delay)
+        {
+            stream->pos++;
+            stream->cur_delay -= stream->rate_delay;
+        }
     }
+    if (!active)
+        stream->done = 1;
 
     return 0;
 }
@@ -130,121 +154,126 @@ void list_devices()
     }
 }
 
+void receive_tweet(char* buffer, struct sockaddr_in* server)
+{
+    struct sockaddr_in client;
+    int transfered = 0, timeoutcount = 0;
+
+    /* Get message from message server */
+    if (!udp_send(sock, "Gimmeh!", server, sizeof(struct sockaddr_in)))
+        error_and_exit("Cannot send message to server", __FILE__, __LINE__);
+
+    transfered = udp_receive(sock, buffer, BUFSIZE, &client, sizeof(client));
+    if (transfered == -1) 
+    {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) 
+        {
+            ++timeoutcount;
+            if (timeoutcount >= MAX_TIMEOUTS) 
+            {
+                printf("Maximum timeouts exceeded. Server is considered dead.");
+                exit(0);
+            }
+            printf("Server timed out (%d).\n", timeoutcount);
+            return;
+        }
+
+        error_and_exit("Cannot read from server", __FILE__, __LINE__);
+    } 
+    else if (transfered == 0) 
+    {
+        error_and_exit("Server has shut down", __FILE__, __LINE__);
+    }
+    if (server->sin_addr.s_addr != client.sin_addr.s_addr)
+        error_and_exit("Received message from unexpected server", __FILE__, __LINE__);
+}
+
 int usage(char* prg)
 {
     printf("USAGE:\n"
-           "    %s -devices\n"
-           "    %s [server ip] [port] [device-id] [channel]\n"
+           "    %s [server ip] [port] [device-id]\n"
            "EXAMPLE:\n"
-           "    %s -devices             # lists available devices\n"
-           "    %s 127.0.0.1 12345 1 2  # play on device 1 on channel 2\n\n", 
-           prg, prg, prg, prg);
+           "    %s 127.0.0.1 12345 1   # play on device 1\n\n", 
+           prg, prg);
     list_devices();
     return 0;
 }
 
+void set_output_parameters(PaStreamParameters *params, int device)
+{
+    const PaDeviceInfo *dev_info;
+
+    params->device = device;
+    dev_info = Pa_GetDeviceInfo( params->device );
+    si.channel_count = dev_info->maxOutputChannels;
+
+    printf("Using device \"%s\" (%d channels)\n",
+            dev_info->name, si.channel_count);
+
+    params->channelCount              = si.channel_count;
+    params->sampleFormat              = paInt16;
+    params->suggestedLatency          = dev_info->defaultLowOutputLatency;
+    params->hostApiSpecificStreamInfo = NULL;
+}
+
 int main(int argc, char** argv)
 {
-    struct sockaddr_in server, client;
+    struct sockaddr_in server;
     char buffer[BUFSIZE+1];
-    int transfered = 0, timeoutcount = 0;
-    const PaDeviceInfo *dev_info;
+    int chan;
     PaStream *stream;
     PaStreamParameters output_parameters;
     PaError err;
+    si.w = NULL;
 
     voice = NULL;
     atexit(at_exit);
     set_signal_handlers();
     init();
 
-    if (argc == 2) {
-        if (strstr(argv[1], "-devices") == NULL)
-            return usage(argv[0]);
-        list_devices();
-        return 0;
-    }
-
-    if (argc != 5)
+    if (argc != 4)
         return usage(argv[0]);
 
-    /* prepare output stream */
-    output_parameters.device = atoi(argv[3]);
-    dev_info = Pa_GetDeviceInfo( output_parameters.device );
-    printf("Using device \"%s\"\n", dev_info->name);
-
-    si.channel_count = dev_info->maxOutputChannels;
-    si.channel = atoi(argv[4]);
-    if (si.channel < 0 || si.channel >= si.channel_count) {
-        fprintf(stderr, "Invalid channel %d. Choose channel between 0 and %d\n",
-                si.channel, si.channel_count);
-        exit(-1);
-    }
-
-    output_parameters.channelCount = si.channel_count;
-    output_parameters.sampleFormat = paInt16;
-    output_parameters.suggestedLatency = dev_info->defaultLowOutputLatency;
-    output_parameters.hostApiSpecificStreamInfo = NULL;
+    set_output_parameters(&output_parameters, atoi(argv[3]));
 
     /* connect to server */
     sock = udp_create_socket(&server, sizeof(server), inet_addr(argv[1]), atoi(argv[2]), WAIT_FOR_RECEIVE);
     if (sock < 0)
         error_and_exit("Cannot create socket", __FILE__, __LINE__);
     
-    for (;;) {
-        /* Get message from message server */
-        if (!udp_send(sock, "Gimmeh!", &server, sizeof(server)))
-            error_and_exit("Cannot send message to server", __FILE__, __LINE__);
-
-        transfered = udp_receive(sock, buffer, BUFSIZE, &client, sizeof(client));
-        if (transfered == -1) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                ++timeoutcount;
-                if (timeoutcount >= MAX_TIMEOUTS) {
-                    printf("Maximum timeouts exceeded. Server is considered dead.");
-                    exit(0);
-                }
-                printf("Server timed out (%d).\n", timeoutcount);
-                continue;
-            } else {
-                error_and_exit("Cannot read from server", __FILE__, __LINE__);
-            }
-        } else if (transfered == 0) {
-                error_and_exit("Server has shut down", __FILE__, __LINE__);
-        }
-        if (server.sin_addr.s_addr != client.sin_addr.s_addr)
-            error_and_exit("Received message from unexpected server", __FILE__, __LINE__);
-
-        timeoutcount = 0;
-
+    /* create speech thingies */
+    si.w = malloc(sizeof(cst_wave) * si.channel_count);
+    for (chan = 0; chan < si.channel_count; ++chan)
+    {
+        memset(buffer, BUFSIZE, 0);
+        receive_tweet(buffer, &server);
         printf("%s\n", buffer);
-
-        /* play tweet and wait for it to finish */
-        if (si.w) {
-            delete_wave(si.w);
-            si.w = NULL;
-            si.pos = 0;
-        }
-
-        si.w = flite_text_to_wave(buffer, voice);
-        err = Pa_OpenStream(&stream, NULL, &output_parameters,
-                (double)si.w->sample_rate, 0, paNoFlag, say_text_callback, &si);
-        if (paNoError != err) {
-            fprintf(stderr, "Cannot open stream: %s\n", Pa_GetErrorText(err));
-            exit(-1);
-        }
-/*        Pa_OpenDefaultStream(&stream, 0, si.channel_count, paInt16,
-                si.w->sample_rate, 0, say_text_callback, &si); */
-        err = Pa_StartStream(stream);
-        if (paNoError != err) {
-            fprintf(stderr, "Cannot start stream: %s\n", Pa_GetErrorText(err));
-            exit(-1);
-        }
-        
-        do {
-            usleep(100);
-        } while (Pa_IsStreamActive(stream));
+        si.w[chan] = flite_text_to_wave(buffer, voice);
     }
+
+    si.done = 0;
+    si.pos = 0;
+    si.cur_delay = 0.;
+    si.rate_delay = 44100. / (double)si.w[0]->sample_rate;
+
+    err = Pa_OpenStream(&stream, NULL, &output_parameters,
+            44100., 0, paNoFlag, say_text_callback, &si);
+    if (paNoError != err) {
+        fprintf(stderr, "Cannot open stream: %s\n", Pa_GetErrorText(err));
+        exit(-1);
+    }
+/*        Pa_OpenDefaultStream(&stream, 0, si.channel_count, paInt16,
+            si.w->sample_rate, 0, say_text_callback, &si); */
+    err = Pa_StartStream(stream);
+    if (paNoError != err) {
+        fprintf(stderr, "Cannot start stream: %s\n", Pa_GetErrorText(err));
+        exit(-1);
+    }
+    
+    do {
+        usleep(100);
+    } while (!si.done);
+    Pa_StopStream(stream);
 
     return 0;
 }

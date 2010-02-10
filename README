@@ -34,15 +34,28 @@ without prior written authorization.
 ====== Building ======
 Step 0: Get and install the following:
     
-   * OpenAL and ALUT     (http://www.openal.org/)
+   * PortAudio           (http://www.portaudio.com/)
    * FLite               (http://www.speech.cs.cmu.edu/flite/)
    * cURL                (http://curl.haxx.se/)
 
-Step 1: Edit Makefile according to your needs.
-Step 2: $ make
-Step 3: Run server: ./twats [port]
-Step 4: Run clients: for i in $(seq 1 50); do ./twatc 127.0.0.1 [port] &; done;
-Step 5: killall twatc twats
+Step 1:   Edit Makefile according to your needs.
+Step 2:   $ make
+
+====== Running ======
+Step 1: Run server: ./twats [port]
+Step 2: See what devices you have: ./twatc
+Setp 3: For every device you have, do something like this:
+
+         while [ 0 ]; do ./twatc [ipaddr] [port] [device]; done;
+
+Step 4: Enjoy till annoyed
+
+Every run of ./twatc will play one tweet per channel and then quit.
+I am not happy with this, as most tweets are not of equal length and
+thus one channel will be silent before the other one finishes.
+The reason for this is a crappy USB sound card I got off eBay, which
+randomly crashes twat. In the final application, this hopefully won't
+matter that much...
 
 ====== External Libraries ======
 For getting tweets from twitter, the twitter API Was used. This
