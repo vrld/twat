@@ -51,8 +51,8 @@ int sock = -1;
 
 struct stream_info {
     cst_wave** w;
-    long pos;
-    int done;
+    long* pos;
+    int* done;
     int channel_count;
     double rate_delay;
     double cur_delay;
@@ -107,22 +107,22 @@ static int say_text_callback(const void* in, void* output,
     struct stream_info* stream = (struct stream_info*)udata;
     short* out = (short*)output;
     unsigned int i;
-    int k, active = 0;
+    int chan;
     cst_wave* wave;
 
     for (i = 0; i < frames; ++i) 
     {
-        for (k = 0; k < stream->channel_count; ++k) 
+        for (chan = 0; chan < stream->channel_count; ++chan) 
         {
-            wave = stream->w[k];
-            if (wave->num_samples - stream->pos - 1 <= 0)
+            wave = stream->w[chan];
+            if (wave->num_samples - stream->pos[chan] - 1 <= 0)
             {
+                stream->done[chan] = 1;
                 *out++ = 0x0FFF;
             } 
             else 
             {
-                *out++ = wave->samples[stream->pos];
-                active = 1;
+                *out++ = wave->samples[ stream->pos[chan] ];
             }
         }
 
@@ -130,28 +130,31 @@ static int say_text_callback(const void* in, void* output,
         stream->cur_delay += 1.;
         if (stream->cur_delay >= stream->rate_delay)
         {
-            stream->pos++;
+
+            for (chan = 0; chan < stream->channel_count; ++chan) 
+                stream->pos[chan]++;
             stream->cur_delay -= stream->rate_delay;
         }
     }
-    if (!active)
-        stream->done = 1;
 
     return 0;
 }
 
-void list_devices()
+void set_output_parameters(PaStreamParameters *params, int device)
 {
-    const PaDeviceInfo* info;
-    PaDeviceIndex dev, dev_count = Pa_GetDeviceCount();
+    const PaDeviceInfo *dev_info;
 
-    printf("Devices:\n");
-    for (dev = 0; dev < dev_count; ++dev)
-    {
-        info = Pa_GetDeviceInfo(dev);
-        printf("   [%02d] \"%s\" (%d channels)\n", 
-                dev, info->name, info->maxOutputChannels);
-    }
+    params->device = device;
+    dev_info = Pa_GetDeviceInfo( params->device );
+    si.channel_count = dev_info->maxOutputChannels;
+
+    printf("Using device \"%s\" (%d channels)\n",
+            dev_info->name, si.channel_count);
+
+    params->channelCount              = si.channel_count;
+    params->sampleFormat              = paInt16;
+    params->suggestedLatency          = dev_info->defaultLowOutputLatency;
+    params->hostApiSpecificStreamInfo = NULL;
 }
 
 void receive_tweet(char* buffer, struct sockaddr_in* server)
@@ -188,6 +191,32 @@ void receive_tweet(char* buffer, struct sockaddr_in* server)
         error_and_exit("Received message from unexpected server", __FILE__, __LINE__);
 }
 
+void next_tweet(struct sockaddr_in* server, int chan)
+{
+    char buffer[BUFSIZE+1];
+    memset(buffer, BUFSIZE, 0);
+    receive_tweet(buffer, server);
+    printf("%s\n", buffer);
+
+    si.w[chan]    = flite_text_to_wave(buffer, voice);
+    si.done[chan] = 0;
+    si.pos[chan]  = 0;
+}
+
+void list_devices()
+{
+    const PaDeviceInfo* info;
+    PaDeviceIndex dev, dev_count = Pa_GetDeviceCount();
+
+    printf("Devices:\n");
+    for (dev = 0; dev < dev_count; ++dev)
+    {
+        info = Pa_GetDeviceInfo(dev);
+        printf("   [%02d] \"%s\" (%d channels)\n", 
+                dev, info->name, info->maxOutputChannels);
+    }
+}
+
 int usage(char* prg)
 {
     printf("USAGE:\n"
@@ -199,27 +228,9 @@ int usage(char* prg)
     return 0;
 }
 
-void set_output_parameters(PaStreamParameters *params, int device)
-{
-    const PaDeviceInfo *dev_info;
-
-    params->device = device;
-    dev_info = Pa_GetDeviceInfo( params->device );
-    si.channel_count = dev_info->maxOutputChannels;
-
-    printf("Using device \"%s\" (%d channels)\n",
-            dev_info->name, si.channel_count);
-
-    params->channelCount              = si.channel_count;
-    params->sampleFormat              = paInt16;
-    params->suggestedLatency          = dev_info->defaultLowOutputLatency;
-    params->hostApiSpecificStreamInfo = NULL;
-}
-
 int main(int argc, char** argv)
 {
     struct sockaddr_in server;
-    char buffer[BUFSIZE+1];
     int chan;
     PaStream *stream;
     PaStreamParameters output_parameters;
@@ -242,17 +253,12 @@ int main(int argc, char** argv)
         error_and_exit("Cannot create socket", __FILE__, __LINE__);
     
     /* create speech thingies */
-    si.w = malloc(sizeof(cst_wave) * si.channel_count);
+    si.w    = malloc(sizeof(cst_wave) * si.channel_count);
+    si.pos  = malloc(sizeof(long) * si.channel_count);
+    si.done = malloc(sizeof(int) * si.channel_count);
     for (chan = 0; chan < si.channel_count; ++chan)
-    {
-        memset(buffer, BUFSIZE, 0);
-        receive_tweet(buffer, &server);
-        printf("%s\n", buffer);
-        si.w[chan] = flite_text_to_wave(buffer, voice);
-    }
+        next_tweet(&server, chan);
 
-    si.done = 0;
-    si.pos = 0;
     si.cur_delay = 0.;
     si.rate_delay = 44100. / (double)si.w[0]->sample_rate;
 
@@ -270,10 +276,16 @@ int main(int argc, char** argv)
         exit(-1);
     }
     
-    do {
+    while (1)
+    {
         usleep(100);
-    } while (!si.done);
-    Pa_StopStream(stream);
+        for (chan = 0; chan < si.channel_count; ++chan) 
+        {
+            if (si.done[chan])
+                next_tweet(&server, chan);
+        }
+    }
+    //Pa_StopStream(stream);
 
     return 0;
 }
