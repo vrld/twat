@@ -26,6 +26,7 @@
  * without prior written authorization.
  */
 #include <stdlib.h>
+#include <time.h>
 
 #include <portaudio.h>
 #include <flite/flite.h>
@@ -50,12 +51,12 @@ cst_voice *voice;
 int sock = -1;
 
 struct stream_info {
+    int channel_count;
     cst_wave** w;
     long* pos;
     int* done;
-    int channel_count;
-    double rate_delay;
-    double cur_delay;
+    double* rate_delay;
+    double* cur_delay;
 };
 
 static struct stream_info si;
@@ -115,25 +116,27 @@ static int say_text_callback(const void* in, void* output,
         for (chan = 0; chan < stream->channel_count; ++chan) 
         {
             wave = stream->w[chan];
-            if (wave->num_samples - stream->pos[chan] - 1 <= 0)
+            if (wave->num_samples - stream->pos[chan] <= 0)
             {
                 stream->done[chan] = 1;
-                *out++ = 0x0FFF;
+                *out++ = (1 << (sizeof(short) - 1));
             } 
-            else 
+            else
             {
-                *out++ = wave->samples[ stream->pos[chan] ];
+                if (!stream->done[chan])
+                    *out++ = wave->samples[ stream->pos[chan] ];
+                else
+                    *out++ = (1 << (sizeof(short) - 1));
             }
-        }
 
-        /* hack for certain sound cards that dont support low sample rates... */
-        stream->cur_delay += 1.;
-        if (stream->cur_delay >= stream->rate_delay)
-        {
-
-            for (chan = 0; chan < stream->channel_count; ++chan) 
+            /* hack for certain sound cards that dont support low sample rates... 
+             * also: slow down/speed up voices for a more lively experience */
+            stream->cur_delay[chan] += 1.;
+            if (stream->cur_delay[chan] >= stream->rate_delay[chan])
+            {
                 stream->pos[chan]++;
-            stream->cur_delay -= stream->rate_delay;
+                stream->cur_delay[chan] -= stream->rate_delay[chan];
+            }
         }
     }
 
@@ -166,27 +169,28 @@ void receive_tweet(char* buffer, struct sockaddr_in* server)
     if (!udp_send(sock, "Gimmeh!", server, sizeof(struct sockaddr_in)))
         error_and_exit("Cannot send message to server", __FILE__, __LINE__);
 
-    transfered = udp_receive(sock, buffer, BUFSIZE, &client, sizeof(client));
-    if (transfered == -1) 
-    {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) 
+    do {
+        transfered = udp_receive(sock, buffer, BUFSIZE, &client, sizeof(client));
+        if (transfered == -1) 
         {
-            ++timeoutcount;
-            if (timeoutcount >= MAX_TIMEOUTS) 
+            if (errno == EAGAIN || errno == EWOULDBLOCK) 
             {
-                printf("Maximum timeouts exceeded. Server is considered dead.");
-                exit(0);
+                ++timeoutcount;
+                if (timeoutcount >= MAX_TIMEOUTS) 
+                {
+                    printf("Maximum timeouts exceeded. Server is considered dead.");
+                    exit(0);
+                }
+                printf("Server timed out (%d).\n", timeoutcount);
             }
-            printf("Server timed out (%d).\n", timeoutcount);
-            return;
-        }
 
-        error_and_exit("Cannot read from server", __FILE__, __LINE__);
-    } 
-    else if (transfered == 0) 
-    {
-        error_and_exit("Server has shut down", __FILE__, __LINE__);
-    }
+            error_and_exit("Cannot read from server", __FILE__, __LINE__);
+        } 
+        else if (transfered == 0) 
+        {
+            error_and_exit("Server has shut down", __FILE__, __LINE__);
+        }
+    } while (transfered <= 0); 
     if (server->sin_addr.s_addr != client.sin_addr.s_addr)
         error_and_exit("Received message from unexpected server", __FILE__, __LINE__);
 }
@@ -198,9 +202,16 @@ void next_tweet(struct sockaddr_in* server, int chan)
     receive_tweet(buffer, server);
     printf("%s\n", buffer);
 
-    si.w[chan]    = flite_text_to_wave(buffer, voice);
-    si.done[chan] = 0;
-    si.pos[chan]  = 0;
+    if (si.w[chan])
+        delete_wave(si.w[chan]);
+
+    si.w[chan]          = flite_text_to_wave(buffer, voice);
+    si.done[chan]       = 0;
+    si.pos[chan]        = 0;
+    si.cur_delay[chan]  = 0.;
+    si.rate_delay[chan] = 44100. / (double)si.w[chan]->sample_rate;
+    /* play some tweets faster, some slower */
+    si.rate_delay[chan] *= (.75 + .5 * (double)(rand() % 256) / 255.);
 }
 
 void list_devices()
@@ -235,9 +246,9 @@ int main(int argc, char** argv)
     PaStream *stream;
     PaStreamParameters output_parameters;
     PaError err;
-    si.w = NULL;
 
     voice = NULL;
+    srand(time(NULL));
     atexit(at_exit);
     set_signal_handlers();
     init();
@@ -253,14 +264,15 @@ int main(int argc, char** argv)
         error_and_exit("Cannot create socket", __FILE__, __LINE__);
     
     /* create speech thingies */
-    si.w    = malloc(sizeof(cst_wave) * si.channel_count);
-    si.pos  = malloc(sizeof(long) * si.channel_count);
-    si.done = malloc(sizeof(int) * si.channel_count);
-    for (chan = 0; chan < si.channel_count; ++chan)
+    si.w          = malloc(sizeof(cst_wave) * si.channel_count);
+    si.pos        = malloc(sizeof(long) * si.channel_count);
+    si.done       = malloc(sizeof(int) * si.channel_count);
+    si.cur_delay  = malloc(sizeof(double) * si.channel_count);
+    si.rate_delay = malloc(sizeof(double) * si.channel_count);
+    for (chan = 0; chan < si.channel_count; ++chan) {
+        si.w[chan] = NULL;
         next_tweet(&server, chan);
-
-    si.cur_delay = 0.;
-    si.rate_delay = 44100. / (double)si.w[0]->sample_rate;
+    }
 
     err = Pa_OpenStream(&stream, NULL, &output_parameters,
             44100., 0, paNoFlag, say_text_callback, &si);
